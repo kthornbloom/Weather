@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather App - Fort Wayne, IN</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-content">
+                <h1 class="title">Fort Wayne Weather</h1>
+                <p class="location">Fort Wayne, Indiana</p>
+            </div>
+        </header>
+
+        <section class="controls">
+            <div class="time-range">
+                <label>
+                    <input type="radio" name="days" value="7" checked> 7 Days
+                </label>
+                <label>
+                    <input type="radio" name="days" value="14"> 14 Days
+                </label>
+            </div>
+
+            <div class="filters">
+                <label class="filter-label">
+                    <input type="checkbox" class="data-filter" value="temperature" checked>
+                    Temperature
+                </label>
+                <label class="filter-label">
+                    <input type="checkbox" class="data-filter" value="humidity" checked>
+                    Humidity
+                </label>
+                <label class="filter-label">
+                    <input type="checkbox" class="data-filter" value="precipitation" checked>
+                    Precipitation
+                </label>
+                <label class="filter-label">
+                    <input type="checkbox" class="data-filter" value="windSpeed" checked>
+                    Wind Speed
+                </label>
+                <label class="filter-label">
+                    <input type="checkbox" class="data-filter" value="cloudCover" checked>
+                    Cloud Cover
+                </label>
+            </div>
+        </section>
+
+        <section class="chart-container">
+            <canvas id="weatherChart"></canvas>
+        </section>
+
+        <section class="stats">
+            <div class="stat-card">
+                <p class="stat-label">Avg Temperature</p>
+                <p class="stat-value" id="avgTemp">--</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">Avg Humidity</p>
+                <p class="stat-value" id="avgHumidity">--</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">Total Precipitation</p>
+                <p class="stat-value" id="totalPrecipitation">--</p>
+            </div>
+            <div class="stat-card">
+                <p class="stat-label">Avg Wind Speed</p>
+                <p class="stat-value" id="avgWindSpeed">--</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
