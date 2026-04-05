@@ -88,6 +88,58 @@ body.app--waiting [data-ui-section].ui-section--visible {
   opacity: 0 !important;
 }
 
+/* Initial fetch: subtle spinner until body.app--waiting is cleared */
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  pointer-events: none;
+  transition:
+    opacity 0.4s ease,
+    visibility 0.4s ease;
+}
+
+body:not(.app--waiting) .app-loader {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.app-loader__spin {
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(0, 255, 255, 0.55);
+  border-radius: 50%;
+  animation: app-loader-spin 0.9s linear infinite;
+}
+
+@keyframes app-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes app-loader-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loader__spin {
+    animation: app-loader-pulse 1.4s ease-in-out infinite;
+    border-top-color: rgba(0, 255, 255, 0.4);
+  }
+}
+
 /* Extra pixel texture layer */
 .grain {
   pointer-events: none;
