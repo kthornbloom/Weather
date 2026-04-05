@@ -9,59 +9,80 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles-v2.css?v=5">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
 </head>
-<body>
-  <div id="alertBar" class="alert-bar" role="region" aria-label="Active weather alerts" hidden></div>
-  <div class="grain" aria-hidden="true"></div>
-  <header class="top">
+<body class="app--waiting" aria-busy="true">
+    <div id="alertBar" class="alert-bar ui-section" data-ui-section role="region" aria-label="Active weather alerts" hidden></div>
+  <header class="top ui-section" data-ui-section>
     <div class="top__meta">
       <h1 class="title">Weather</h1>
       <p class="place" id="placeLabel">Locating…</p>
-      <p class="right-now" id="rightNow" aria-live="polite"></p>
-    </div>
-    <div class="metric-picker" id="metricPicker">
-      <button type="button" class="metric-picker__toggle" id="metricToggle" aria-expanded="false" aria-haspopup="listbox" aria-controls="metricList">
-        <span class="metric-picker__current" id="metricCurrent">Metric</span>
-        <span class="metric-picker__caret" aria-hidden="true"></span>
-      </button>
-      <div class="metric-picker__panel" id="metricPanel" hidden>
-        <ul class="metric-picker__list" id="metricList" role="radiogroup" aria-labelledby="metricToggle"></ul>
+      <div class="right-now-block" id="rightNowBlock" aria-live="polite">
+        <p class="right-now__summary" id="rightNowSummary"></p>
+        <div class="right-now__stats" id="rightNowStats" aria-label="Current conditions"></div>
       </div>
     </div>
   </header>
 
+
   <main class="chart-wrap">
-    <div class="chart-toolbar">
-      <div class="period" role="group" aria-label="Time range">
-        <button type="button" class="period__btn is-active" id="periodDay" data-mode="day">Day</button>
-        <button type="button" class="period__btn" id="periodWeek" data-mode="week">Week</button>
-        <button type="button" class="period__btn" id="periodRadar" data-mode="radar">Radar</button>
+    <section class="metric-blurb ui-section" id="metricBlurb" data-ui-section aria-live="polite">
+      <div class="metric-blurb__row">
+        <div class="metric-blurb__left">
+          <h2 class="metric-blurb__heading">
+            <span id="metricBlurbTitle">Metric</span><span id="metricDayHiLo" class="metric-blurb__hilo" hidden></span>
+          </h2>
+          <p class="metric-blurb__desc" id="metricBlurbDesc"></p>
+        </div>
+        <div class="metric-blurb__picker-slot">
+          <div class="metric-picker" id="metricPicker">
+            <button
+              type="button"
+              class="metric-open-btn"
+              id="metricToggle"
+              aria-expanded="false"
+              aria-haspopup="listbox"
+              aria-controls="metricList"
+            >
+              ▼
+            </button>
+            <div class="metric-picker__panel" id="metricPanel" hidden>
+              <ul class="metric-picker__list" id="metricList" role="radiogroup" aria-labelledby="metricToggle"></ul>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="day-nav" id="dayNav">
-        <button type="button" class="day-nav__btn" id="dayPrev" aria-label="Previous day">←</button>
-        <span class="day-nav__label" id="dayLabel">—</span>
-        <button type="button" class="day-nav__btn" id="dayNext" aria-label="Next day">→</button>
-      </div>
-    </div>
+    </section>
+    
+
 
     <div id="chartViewPanel">
-      <section class="metric-blurb" id="metricBlurb" aria-live="polite">
-        <h2 class="metric-blurb__title" id="metricBlurbTitle">Metric</h2>
-        <p class="metric-blurb__desc" id="metricBlurbDesc"></p>
-      </section>
-
-      <div class="chart-row">
-        <div class="chart-y-rail" id="yRailWrap">
-          <div class="chart-y-rail__cap" id="yRailCap"></div>
-          <div class="chart-y-rail__ticks" id="yRail"></div>
+      <div class="chart-main ui-section" data-ui-section>
+        <div class="chart-toolbar">
+          <div class="period" role="group" aria-label="Time range">
+            <button type="button" class="period__btn is-active" id="periodDay" data-mode="day">Day</button>
+            <button type="button" class="period__btn" id="periodWeek" data-mode="week">Week</button>
+            <button type="button" class="period__btn" id="periodRadar" data-mode="radar">Radar</button>
+          </div>
+          <div class="day-nav" id="dayNav">
+            <button type="button" class="day-nav__btn" id="dayPrev" aria-label="Previous day">←</button>
+            <span class="day-nav__label" id="dayLabel">—</span>
+            <button type="button" class="day-nav__btn" id="dayNext" aria-label="Next day">→</button>
+          </div>
         </div>
-        <div class="chart-scroll" id="chartScroll">
-          <div class="chart-scroll-inner" id="chartScrollInner">
-            <div class="chart-canvas-spacer" aria-hidden="true"></div>
-            <div class="chart-canvas-wrap">
-              <canvas id="weatherChart" aria-label="Hourly weather chart"></canvas>
+
+        <div class="chart-row">
+          <div class="chart-y-rail" id="yRailWrap">
+            <div class="chart-y-rail__cap" id="yRailCap"></div>
+            <div class="chart-y-rail__ticks" id="yRail"></div>
+          </div>
+          <div class="chart-scroll" id="chartScroll">
+            <div class="chart-scroll-inner" id="chartScrollInner">
+              <div class="chart-canvas-spacer" aria-hidden="true"></div>
+              <div class="chart-canvas-wrap">
+                <canvas id="weatherChart" aria-label="Hourly weather chart"></canvas>
+              </div>
             </div>
           </div>
         </div>
@@ -85,10 +106,15 @@
     </div>
   </main>
 
-  <p class="status" id="status" role="status"></p>
+  <p class="status ui-section" id="status" data-ui-section role="status"></p>
+  <div class="notify-row ui-section" id="notifyRow" data-ui-section>
+    <button type="button" class="notify-row__btn" id="alertNotifyBtn" aria-pressed="false" aria-label="Toggle weather alert notifications">
+      Alert notifications: off
+    </button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
-  <script src="script.js" defer></script>
+  <script src="script-v2.js?v=5" defer></script>
 </body>
 </html>

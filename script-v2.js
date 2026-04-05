@@ -172,18 +172,21 @@
     }
   ];
 
-  var COLOR_LINE = '#ffffff';
+  /** Main series line (cyan) */
+  var COLOR_LINE = '#00e8f0';
   var COLOR_NOW = '#ebde34';
 
   var hourlyParamString = HOURLY_OPTIONS.map(function (o) { return o.key; }).join(',');
+  /** Extra hourly fields for the header strip only (not chart metrics). */
+  var forecastHourlyParamString = hourlyParamString + ',uv_index';
 
   var placeEl = document.getElementById('placeLabel');
   var statusEl = document.getElementById('status');
   var canvas = document.getElementById('weatherChart');
   var metricPicker = document.getElementById('metricPicker');
   var metricToggle = document.getElementById('metricToggle');
-  var metricCurrent = document.getElementById('metricCurrent');
   var metricPanel = document.getElementById('metricPanel');
+  var metricDayHiLoEl = document.getElementById('metricDayHiLo');
   var metricList = document.getElementById('metricList');
   var chartScroll = document.getElementById('chartScroll');
   var chartScrollInner = document.getElementById('chartScrollInner');
@@ -201,8 +204,11 @@
   var dayLabel = document.getElementById('dayLabel');
   var metricBlurbTitle = document.getElementById('metricBlurbTitle');
   var metricBlurbDesc = document.getElementById('metricBlurbDesc');
-  var rightNowEl = document.getElementById('rightNow');
+  var rightNowSummaryEl = document.getElementById('rightNowSummary');
+  var rightNowStatsEl = document.getElementById('rightNowStats');
   var alertBarEl = document.getElementById('alertBar');
+  var alertNotifyBtn = document.getElementById('alertNotifyBtn');
+  var notifyRow = document.getElementById('notifyRow');
 
   var chartInstance = null;
   /** Full API response slice */
@@ -214,6 +220,14 @@
   var viewMode = 'day';
   var uniqueDayKeys = [];
   var selectedDayIndex = 0;
+
+  /** Latest NWS alert props (same list as the alert bar); used when enabling notifications. */
+  var lastFetchedAlerts = [];
+
+  var LS_ALERT_NOTIFY = 'weatherAlertNotifyOn';
+  var LS_ALERT_SEEN = 'weatherAlertSeenIds';
+  var SEEN_IDS_MAX = 200;
+  var ALERT_POLL_MS = 8 * 60 * 1000;
 
   /** WMO Weather interpretation codes (Open-Meteo / ECMWF style) */
   function wmoCodeToPhrase(code) {
@@ -236,18 +250,131 @@
     return 'Mixed conditions';
   }
 
-  function updateRightNow(cw) {
-    if (!rightNowEl) return;
+  function phraseToLowerSentence(phrase) {
+    if (!phrase) return '';
+    return phrase.charAt(0).toLowerCase() + phrase.slice(1);
+  }
+
+  function hourlyIndexForCurrent(hourlyTimes, refIso) {
+    if (!hourlyTimes || !hourlyTimes.length) return 0;
+    var ref = refIso ? Date.parse(refIso) : Date.now();
+    if (isNaN(ref)) ref = Date.now();
+    var best = 0;
+    var bestDiff = Infinity;
+    for (var i = 0; i < hourlyTimes.length; i++) {
+      var t = Date.parse(hourlyTimes[i]);
+      if (isNaN(t)) continue;
+      var d = Math.abs(t - ref);
+      if (d < bestDiff) {
+        bestDiff = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function formatLocalTimeShort(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  /** UV index → three-band label (Open-Meteo hourly uv_index). */
+  function uvIndexToLevel(uvi) {
+    if (uvi == null || isNaN(uvi)) return null;
+    if (uvi < 3) return 'low';
+    if (uvi < 6) return 'med';
+    return 'high';
+  }
+
+  function maxPollenFromCurrent(cur) {
+    if (!cur || typeof cur !== 'object') return null;
+    var keys = [
+      'alder_pollen',
+      'birch_pollen',
+      'grass_pollen',
+      'mugwort_pollen',
+      'olive_pollen',
+      'ragweed_pollen'
+    ];
+    var max = null;
+    for (var i = 0; i < keys.length; i++) {
+      var v = cur[keys[i]];
+      if (v != null && !isNaN(v)) {
+        if (max === null || v > max) max = v;
+      }
+    }
+    return max;
+  }
+
+  function appendRightNowStat(container, value, label) {
+    var cell = document.createElement('div');
+    cell.className = 'right-now__stat';
+    var v = document.createElement('div');
+    v.className = 'right-now__value';
+    v.textContent = value;
+    var l = document.createElement('div');
+    l.className = 'right-now__label';
+    l.textContent = label;
+    cell.appendChild(v);
+    cell.appendChild(l);
+    container.appendChild(cell);
+  }
+
+  function updateRightNow(data, pollenData) {
+    if (!rightNowSummaryEl || !rightNowStatsEl) return;
+    var cw = data && data.current_weather;
     if (!cw || cw.temperature == null) {
-      rightNowEl.textContent = '';
+      rightNowSummaryEl.textContent = '';
+      rightNowStatsEl.innerHTML = '';
       return;
     }
-    var t = Math.round(cw.temperature * 10) / 10;
-    var parts = [t + '°F', wmoCodeToPhrase(cw.weathercode)];
-    if (cw.windspeed != null && !isNaN(cw.windspeed)) {
-      parts.push(Math.round(cw.windspeed) + ' mph wind');
+    var phrase = phraseToLowerSentence(wmoCodeToPhrase(cw.weathercode));
+    rightNowSummaryEl.textContent = 'Right now: ' + phrase + '.';
+
+    rightNowStatsEl.innerHTML = '';
+    var hi = data.hourly;
+    var ix = hi && hi.time ? hourlyIndexForCurrent(hi.time, cw.time) : 0;
+
+    var tempStr = Math.round(cw.temperature) + '°F';
+    var windStr =
+      cw.windspeed != null && !isNaN(cw.windspeed) ? Math.round(cw.windspeed) + ' mph' : '—';
+
+    var humidStr = '—';
+    if (hi && hi.relative_humidity_2m && hi.relative_humidity_2m[ix] != null) {
+      humidStr = Math.round(hi.relative_humidity_2m[ix]) + '%';
     }
-    rightNowEl.textContent = 'Right now: ' + parts.join(', ') + '.';
+
+    var uvStr = '—';
+    if (hi && hi.uv_index && hi.uv_index[ix] != null && !isNaN(hi.uv_index[ix])) {
+      var level = uvIndexToLevel(hi.uv_index[ix]);
+      if (level) uvStr = level;
+    }
+
+    var daily = data.daily;
+    var riseStr = '—';
+    var setStr = '—';
+    if (daily && daily.sunrise && daily.sunrise.length && daily.sunset && daily.sunset.length) {
+      riseStr = formatLocalTimeShort(daily.sunrise[0]);
+      setStr = formatLocalTimeShort(daily.sunset[0]);
+    }
+
+    var pollenVal = null;
+    if (pollenData && pollenData.current) {
+      pollenVal = maxPollenFromCurrent(pollenData.current);
+    }
+
+    appendRightNowStat(rightNowStatsEl, tempStr, 'Temp');
+    appendRightNowStat(rightNowStatsEl, windStr, 'Wind');
+    if (pollenVal != null && !isNaN(pollenVal)) {
+      var pollenStr = pollenVal < 10 ? String(Math.round(pollenVal * 10) / 10) : String(Math.round(pollenVal));
+      appendRightNowStat(rightNowStatsEl, pollenStr, 'Pollen');
+    }
+    appendRightNowStat(rightNowStatsEl, humidStr, 'Humid.');
+    appendRightNowStat(rightNowStatsEl, uvStr, 'UV');
+    appendRightNowStat(rightNowStatsEl, riseStr, 'Sunrise');
+    appendRightNowStat(rightNowStatsEl, setStr, 'Sunset');
   }
 
   function pad2(n) {
@@ -336,11 +463,10 @@
     var o = optByKey(key);
     if (metricBlurbTitle) metricBlurbTitle.textContent = o.blurbTitle || o.label;
     if (metricBlurbDesc) metricBlurbDesc.textContent = o.description || '';
+    updateMetricDayHiLo();
   }
 
   function setToggleLabel(key) {
-    var o = optByKey(key);
-    metricCurrent.textContent = o.label;
     updateMetricBlurb(key);
   }
 
@@ -382,14 +508,19 @@
     setPanelOpen(false);
   }
 
-  function formatTickLabel(iso) {
+  var WEEK_AXIS_DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  var WEEK_AXIS_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+  /** Week view x-axis: day + date only (no time); tooltip still uses {@link formatFullTime}. */
+  function formatWeekAxisLabel(iso) {
     var d = new Date(iso);
-    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    var h = d.getHours();
-    var ampm = h >= 12 ? 'p' : 'a';
-    var hr = h % 12;
-    if (hr === 0) hr = 12;
-    return months[d.getMonth()] + ' ' + d.getDate() + ' ' + hr + ampm;
+    return (
+      WEEK_AXIS_DAYS[d.getDay()] +
+      ' ' +
+      WEEK_AXIS_MONTHS[d.getMonth()] +
+      ' ' +
+      d.getDate()
+    );
   }
 
   /** Shorter x labels in day view */
@@ -425,8 +556,8 @@
 
   function computeScrollInnerWidth(pointCount) {
     var w = chartScroll.clientWidth || document.documentElement.clientWidth || 360;
-    var zoom = viewMode === 'day' ? 1.38 : 1.22;
-    var perPoint = viewMode === 'day' ? 22 : 11;
+    var zoom = viewMode === 'day' ? 1.58 : 1.22;
+    var perPoint = viewMode === 'day' ? 32 : 11;
     return Math.max(Math.floor(w * zoom), Math.max(pointCount, 4) * perPoint);
   }
 
@@ -495,6 +626,56 @@
     return now >= new Date(times[0]).getTime() && now <= new Date(times[times.length - 1]).getTime();
   }
 
+  function isViewingLocalToday() {
+    var key = uniqueDayKeys[selectedDayIndex];
+    return key && key === localDayKeyToday();
+  }
+
+  function prefersReducedMotion() {
+    return (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+  }
+
+  function scrollChartStripTo(left, smooth) {
+    if (!chartScroll) return;
+    var useSmooth = smooth && !prefersReducedMotion();
+    if (!useSmooth || typeof chartScroll.scrollTo !== 'function') {
+      chartScroll.scrollLeft = left;
+      return;
+    }
+    try {
+      chartScroll.scrollTo({ left: left, behavior: 'smooth' });
+    } catch (e) {
+      chartScroll.scrollLeft = left;
+    }
+  }
+
+  /**
+   * When day view shows today and "now" is in range, scroll the chart strip so NOW is in view.
+   * @param {{ smooth?: boolean }} [opt] — default smooth after line reveal; use { smooth: false } on resize.
+   */
+  function scrollChartToNowIfNeeded(opt) {
+    if (viewMode !== 'day') return;
+    if (!isViewingLocalToday()) return;
+    if (!chartScroll || !chartInstance) return;
+    if (!nowInView(viewTimesIso)) return;
+    var xNow = getNowXPixel(chartInstance, viewTimesIso);
+    if (xNow == null || !isFinite(xNow)) return;
+    var vw = chartScroll.clientWidth;
+    if (vw <= 0) return;
+    var sl = chartScroll.scrollLeft;
+    var margin = 28;
+    if (xNow >= sl + margin && xNow <= sl + vw - margin) return;
+    var maxScroll = Math.max(0, chartScroll.scrollWidth - vw);
+    var target = xNow - vw / 2;
+    if (target < 0) target = 0;
+    if (target > maxScroll) target = maxScroll;
+    var smooth = !opt || opt.smooth !== false;
+    scrollChartStripTo(target, smooth);
+  }
+
   var nowLinePlugin = {
     id: 'nowLine',
     afterDraw: function (chart) {
@@ -523,6 +704,85 @@
 
   Chart.register(nowLinePlugin);
 
+  var lineRevealPlugin = {
+    id: 'lineReveal',
+    beforeDatasetDraw: function (chart, args) {
+      if (args.index !== 0) return;
+      var p = chart.$lineRevealProgress;
+      if (p == null || p >= 1) return;
+      var area = chart.chartArea;
+      if (!area || area.right <= area.left) return;
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        area.left,
+        area.top - 10,
+        Math.max(0, (area.right - area.left) * p),
+        area.bottom - area.top + 20
+      );
+      ctx.clip();
+      chart.$lineRevealDidClip = true;
+    },
+    afterDatasetDraw: function (chart, args) {
+      if (args.index === 0 && chart.$lineRevealDidClip) {
+        chart.ctx.restore();
+        chart.$lineRevealDidClip = false;
+      }
+    }
+  };
+
+  Chart.register(lineRevealPlugin);
+
+  function startLineRevealAnimation() {
+    var chart = chartInstance;
+    if (!chart) return;
+    chart.$lineRevealProgress = 0;
+    chart.update('none');
+    var revealMs = 920;
+    var start = performance.now();
+    function easeOutQuad(t) {
+      return 1 - (1 - t) * (1 - t);
+    }
+    function tick() {
+      if (!chartInstance || chartInstance !== chart) return;
+      var u = Math.min(1, (performance.now() - start) / revealMs);
+      chart.$lineRevealProgress = easeOutQuad(u);
+      chart.update('none');
+      if (u < 1) {
+        requestAnimationFrame(tick);
+      } else {
+        chart.$lineRevealProgress = 1;
+        scrollChartToNowIfNeeded();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  var UI_STAGGER_MS = 58;
+
+  function revealUiStaggered() {
+    document.body.classList.remove('app--waiting');
+    document.body.setAttribute('aria-busy', 'false');
+    var sections = document.querySelectorAll('[data-ui-section]');
+    for (var i = 0; i < sections.length; i++) {
+      (function (index) {
+        setTimeout(function () {
+          sections[index].classList.add('ui-section--visible');
+        }, index * UI_STAGGER_MS);
+      })(i);
+    }
+  }
+
+  function revealUiImmediate() {
+    document.body.classList.remove('app--waiting');
+    document.body.setAttribute('aria-busy', 'false');
+    var sections = document.querySelectorAll('[data-ui-section]');
+    for (var i = 0; i < sections.length; i++) {
+      sections[i].classList.add('ui-section--visible');
+    }
+  }
+
   function buildChart(xLabels, seriesKey, payload) {
     var meta = optByKey(seriesKey);
     var raw = payload && payload[seriesKey] ? payload[seriesKey] : [];
@@ -536,8 +796,8 @@
       chartInstance = null;
     }
 
-    var xMaxTicks = viewMode === 'day' ? 24 : 16;
-    var xFontSize = viewMode === 'day' ? 10 : 9;
+    var xMaxTicks = viewMode === 'day' ? 28 : 16;
+    var xFontSize = viewMode === 'day' ? 11 : 9;
 
     var yScale = {
       position: 'left',
@@ -583,11 +843,15 @@
         responsive: true,
         maintainAspectRatio: false,
         layout: {
-          padding: { left: 2, right: 4, top: 6, bottom: 2 }
+          padding: {
+            left: 2,
+            right: 4,
+            top: 6,
+            bottom: viewMode === 'day' ? 8 : 2
+          }
         },
         animation: {
-          duration: 1100,
-          easing: 'easeOutQuart'
+          duration: 0
         },
         interaction: {
           mode: 'index',
@@ -600,7 +864,7 @@
             backgroundColor: '#000000',
             titleColor: '#ffffff',
             bodyColor: '#ffffff',
-            borderColor: '#ffffff',
+            borderColor: COLOR_LINE,
             borderWidth: 1,
             padding: 12,
             cornerRadius: 0,
@@ -629,7 +893,8 @@
             ticks: {
               color: '#ffffff',
               maxRotation: 0,
-              autoSkip: true,
+              autoSkip: viewMode !== 'day',
+              autoSkipPadding: viewMode === 'day' ? 10 : 4,
               maxTicksLimit: xMaxTicks,
               font: { family: 'JetBrains Mono, Consolas, monospace', size: xFontSize }
             },
@@ -639,6 +904,7 @@
         }
       }
     });
+    startLineRevealAnimation();
   }
 
   function refreshChart() {
@@ -653,6 +919,7 @@
         chartInstance = null;
       }
       yRail.innerHTML = '';
+      updateMetricDayHiLo();
       return;
     }
     statusEl.textContent = '';
@@ -660,10 +927,14 @@
     applyScrollInnerWidth(viewTimesIso.length);
 
     var xLabels = viewTimesIso.map(function (iso) {
-      return viewMode === 'day' ? formatXTickShort(iso) : formatTickLabel(iso);
+      if (viewMode === 'day') return formatXTickShort(iso);
+      /* Week: label every hour with that hour's day+date (repeated across the day). Empty
+       * strings broke Chart.js autoSkip — most chosen tick indices had no text. */
+      return formatWeekAxisLabel(iso);
     });
     requestAnimationFrame(function () {
       buildChart(xLabels, getSelectedKey(), slice.payload);
+      updateMetricDayHiLo();
     });
   }
 
@@ -789,13 +1060,30 @@
       '&longitude=' +
       lon +
       '&hourly=' +
-      encodeURIComponent(hourlyParamString) +
-      '&timezone=auto&forecast_days=7&current_weather=true' +
+      encodeURIComponent(forecastHourlyParamString) +
+      '&daily=sunrise,sunset&timezone=auto&forecast_days=7&current_weather=true' +
       '&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch';
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error('Forecast ' + r.status);
       return r.json();
     });
+  }
+
+  function fetchPollen(lat, lon) {
+    return fetch(
+      'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=' +
+        lat +
+        '&longitude=' +
+        lon +
+        '&timezone=auto&current=alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen'
+    )
+      .then(function (r) {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .catch(function () {
+        return null;
+      });
   }
 
   function zoneIdFromNwsUrl(url) {
@@ -939,6 +1227,207 @@
     alertBarEl.hidden = !any;
   }
 
+  function stableAlertId(p) {
+    if (!p) return '';
+    if (p.id) return String(p.id);
+    return (p.sent || '') + '|' + (p.event || '') + '|' + (p.headline || '');
+  }
+
+  function notificationTagForAlertId(id) {
+    var s = String(id);
+    if (s.length <= 120) return s;
+    return s.slice(0, 56) + '…' + s.slice(-60);
+  }
+
+  function loadSeenAlertIds() {
+    try {
+      var raw = localStorage.getItem(LS_ALERT_SEEN);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSeenAlertIds(ids) {
+    var a = ids.slice(-SEEN_IDS_MAX);
+    try {
+      localStorage.setItem(LS_ALERT_SEEN, JSON.stringify(a));
+    } catch (e) {}
+  }
+
+  function isAlertNotifyEnabled() {
+    return localStorage.getItem(LS_ALERT_NOTIFY) === '1';
+  }
+
+  function setAlertNotifyEnabled(on) {
+    if (on) {
+      localStorage.setItem(LS_ALERT_NOTIFY, '1');
+    } else {
+      localStorage.removeItem(LS_ALERT_NOTIFY);
+    }
+  }
+
+  function seedSeenAlertIdsFromList(propsList) {
+    if (!propsList || !propsList.length) return;
+    var seen = new Set(loadSeenAlertIds());
+    for (var i = 0; i < propsList.length; i++) {
+      var id = stableAlertId(propsList[i]);
+      if (id) seen.add(id);
+    }
+    saveSeenAlertIds(Array.from(seen));
+  }
+
+  function showOneAlertNotification(reg, p, alertId) {
+    var title = (p.event || 'Weather alert').trim() || 'Weather alert';
+    var body = (p.headline || '').trim() || 'Active alert for your area.';
+    var tag = notificationTagForAlertId(alertId);
+    var baseUrl = new URL('./', location.href).href;
+    var opts = {
+      body: body,
+      icon: './icon.svg',
+      badge: './icon.svg',
+      tag: tag,
+      renotify: false,
+      data: { url: baseUrl }
+    };
+    if (reg && reg.showNotification) {
+      reg.showNotification(title, opts);
+    } else {
+      try {
+        void new Notification(title, { body: body, tag: tag });
+      } catch (e) {}
+    }
+  }
+
+  function whenServiceWorkerReady() {
+    if (!('serviceWorker' in navigator)) {
+      return Promise.resolve(null);
+    }
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish(reg) {
+        if (done) return;
+        done = true;
+        resolve(reg || null);
+      }
+      navigator.serviceWorker.ready.then(finish).catch(function () {
+        finish(null);
+      });
+      setTimeout(function () {
+        finish(null);
+      }, 5000);
+    });
+  }
+
+  function maybeNotifyForNewAlerts(propsList) {
+    if (!isAlertNotifyEnabled()) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!propsList || !propsList.length) return;
+
+    var seen = new Set(loadSeenAlertIds());
+    var fresh = [];
+    for (var i = 0; i < propsList.length; i++) {
+      var p = propsList[i];
+      var id = stableAlertId(p);
+      if (!id || seen.has(id)) continue;
+      fresh.push({ p: p, id: id });
+    }
+    if (!fresh.length) return;
+
+    function commitShown() {
+      for (var j = 0; j < fresh.length; j++) {
+        seen.add(fresh[j].id);
+      }
+      saveSeenAlertIds(Array.from(seen));
+    }
+
+    whenServiceWorkerReady().then(function (reg) {
+      for (var k = 0; k < fresh.length; k++) {
+        showOneAlertNotification(reg, fresh[k].p, fresh[k].id);
+      }
+      commitShown();
+    });
+  }
+
+  function updateAlertNotifyButton() {
+    if (!alertNotifyBtn) return;
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'denied') {
+      alertNotifyBtn.textContent = 'Notifications blocked';
+      alertNotifyBtn.setAttribute('aria-pressed', 'false');
+      alertNotifyBtn.disabled = true;
+      alertNotifyBtn.title = 'Enable notifications for this site in your browser settings.';
+      return;
+    }
+    alertNotifyBtn.disabled = false;
+    alertNotifyBtn.title = '';
+    var on = isAlertNotifyEnabled() && Notification.permission === 'granted';
+    if (on) {
+      alertNotifyBtn.textContent = 'Alert notifications: on';
+      alertNotifyBtn.setAttribute('aria-pressed', 'true');
+    } else {
+      alertNotifyBtn.textContent = 'Alert notifications: off';
+      alertNotifyBtn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
+  function bindAlertNotifyButton() {
+    if (!alertNotifyBtn) return;
+    alertNotifyBtn.addEventListener('click', function () {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'denied') return;
+      if (isAlertNotifyEnabled()) {
+        setAlertNotifyEnabled(false);
+        updateAlertNotifyButton();
+        return;
+      }
+      Notification.requestPermission()
+        .then(function (perm) {
+          if (perm !== 'granted') {
+            updateAlertNotifyButton();
+            return;
+          }
+          setAlertNotifyEnabled(true);
+          seedSeenAlertIdsFromList(lastFetchedAlerts);
+          updateAlertNotifyButton();
+        })
+        .catch(function () {
+          updateAlertNotifyButton();
+        });
+    });
+    updateAlertNotifyButton();
+  }
+
+  function notificationsContextOk() {
+    if (typeof Notification === 'undefined') return false;
+    if (location.protocol === 'https:') return true;
+    var h = location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
+  }
+
+  function initAlertNotifyUi() {
+    if (!notifyRow || !alertNotifyBtn) return;
+    if (!notificationsContextOk()) {
+      notifyRow.hidden = true;
+      return;
+    }
+    bindAlertNotifyButton();
+  }
+
+  function startAlertPollingIfEnabled() {
+    if (typeof Notification === 'undefined') return;
+    setInterval(function () {
+      if (!isAlertNotifyEnabled() || Notification.permission !== 'granted') return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetchNwsAlerts(userLat, userLon).then(function (alerts) {
+        lastFetchedAlerts = alerts || [];
+        renderAlerts(lastFetchedAlerts);
+        maybeNotifyForNewAlerts(lastFetchedAlerts);
+      });
+    }, ALERT_POLL_MS);
+  }
+
   function formatTooltipValue(v, seriesKey) {
     if (v == null || Number.isNaN(v)) return null;
     var abs = Math.abs(v);
@@ -958,6 +1447,55 @@
     if (abs >= 100) return v.toFixed(0);
     if (abs >= 10) return v.toFixed(1);
     return v.toFixed(2);
+  }
+
+  /** Day view only: min/max for the visible day next to the metric title. */
+  function updateMetricDayHiLo() {
+    if (!metricDayHiLoEl) return;
+    if (viewMode !== 'day') {
+      metricDayHiLoEl.hidden = true;
+      metricDayHiLoEl.textContent = '';
+      return;
+    }
+    if (!fullHourlyPayload) {
+      metricDayHiLoEl.hidden = true;
+      return;
+    }
+    var slice = sliceDataForView();
+    var key = getSelectedKey();
+    var arr = slice.payload && slice.payload[key] ? slice.payload[key] : [];
+    var nums = [];
+    for (var i = 0; i < arr.length; i++) {
+      var x = Number(arr[i]);
+      if (!isNaN(x)) nums.push(x);
+    }
+    if (!nums.length) {
+      metricDayHiLoEl.hidden = true;
+      metricDayHiLoEl.textContent = '';
+      return;
+    }
+    var hi = Math.max.apply(null, nums);
+    var lo = Math.min.apply(null, nums);
+    var meta = optByKey(key);
+    var hiStr = formatTooltipValue(hi, key);
+    var loStr = formatTooltipValue(lo, key);
+    if (hiStr == null || loStr == null) {
+      metricDayHiLoEl.hidden = true;
+      return;
+    }
+    var u = meta.unit || '';
+    metricDayHiLoEl.hidden = false;
+    metricDayHiLoEl.textContent = '';
+    metricDayHiLoEl.appendChild(document.createTextNode(': '));
+    var spanHi = document.createElement('span');
+    spanHi.className = 'metric-blurb__hi';
+    spanHi.textContent = '▲ ' + hiStr + u;
+    metricDayHiLoEl.appendChild(spanHi);
+    metricDayHiLoEl.appendChild(document.createTextNode(' '));
+    var spanLo = document.createElement('span');
+    spanLo.className = 'metric-blurb__lo';
+    spanLo.textContent = '▼ ' + loStr + u;
+    metricDayHiLoEl.appendChild(spanLo);
   }
 
   function setPlaceLabel(lat, lon, usedDefault) {
@@ -1060,17 +1598,25 @@
     updateMainPanels();
     updateDayNav();
     statusEl.textContent = '';
+    initAlertNotifyUi();
+    startAlertPollingIfEnabled();
 
     resolveLocation()
       .then(function (loc) {
         userLat = loc.lat;
         userLon = loc.lon;
         setPlaceLabel(loc.lat, loc.lon, loc.usedDefault);
-        return Promise.all([fetchForecast(loc.lat, loc.lon), fetchNwsAlerts(loc.lat, loc.lon)]);
+        return Promise.all([
+          fetchForecast(loc.lat, loc.lon),
+          fetchNwsAlerts(loc.lat, loc.lon),
+          fetchPollen(loc.lat, loc.lon)
+        ]);
       })
       .then(function (results) {
         var data = results[0];
-        renderAlerts(results[1]);
+        lastFetchedAlerts = results[1] || [];
+        renderAlerts(lastFetchedAlerts);
+        maybeNotifyForNewAlerts(lastFetchedAlerts);
         if (!data.hourly || !data.hourly.time) throw new Error('No hourly data');
         fullTimesIso = data.hourly.time;
         fullHourlyPayload = data.hourly;
@@ -1078,13 +1624,19 @@
         var today = localDayKeyToday();
         var ix = uniqueDayKeys.indexOf(today);
         selectedDayIndex = ix >= 0 ? ix : 0;
-        updateRightNow(data.current_weather);
+        updateRightNow(data, results[2]);
         updateDayNav();
-        refreshChart();
+        revealUiStaggered();
+        setTimeout(function () {
+          refreshChart();
+        }, 210);
       })
       .catch(function (err) {
+        revealUiImmediate();
+        lastFetchedAlerts = [];
         renderAlerts([]);
-        if (rightNowEl) rightNowEl.textContent = '';
+        if (rightNowSummaryEl) rightNowSummaryEl.textContent = '';
+        if (rightNowStatsEl) rightNowStatsEl.innerHTML = '';
         statusEl.textContent = String(err.message || err);
       });
   }
@@ -1105,12 +1657,13 @@
     if (chartInstance) {
       chartInstance.resize();
       syncYRail(chartInstance);
+      requestAnimationFrame(function () {
+        scrollChartToNowIfNeeded({ smooth: false });
+      });
     }
   });
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function () {});
-    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
   }
 })();

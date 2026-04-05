@@ -1,66 +1,81 @@
 /* global self, caches */
-var CACHE = 'weather-v1';
-var ASSETS = [
-  './',
-  './index.html',
-  './styles.css',
-  './script.js',
-  './manifest.json',
-  './icon.svg',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
-];
+/**
+ * Network-first for app + Chart CDN: online users always get fresh JS/CSS/HTML.
+ * Falls back to cache when offline. Bump CACHE_NAME when you need to drop old entries.
+ */
+var CACHE_NAME = 'weather-v5';
 
 self.addEventListener('install', function (event) {
-  event.waitUntil(
-    caches.open(CACHE).then(function (cache) {
-      var local = ASSETS.filter(function (u) { return u.indexOf('http') !== 0; });
-      return cache.addAll(
-        local.map(function (u) {
-          return new Request(u, { cache: 'reload' });
-        })
-      ).then(function () {
-        return fetch(ASSETS[ASSETS.length - 1], { cache: 'reload' }).then(function (res) {
-          if (res.ok) return cache.put(ASSETS[ASSETS.length - 1], res);
-        });
-      }).catch(function () {});
-    })
-  );
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', function (event) {
   event.waitUntil(
-    caches.keys().then(function (keys) {
-      return Promise.all(
-        keys
-          .filter(function (k) { return k !== CACHE; })
-          .map(function (k) { return caches.delete(k); })
-      );
+    caches
+      .keys()
+      .then(function (keys) {
+        return Promise.all(
+          keys
+            .filter(function (k) {
+              return k !== CACHE_NAME;
+            })
+            .map(function (k) {
+              return caches.delete(k);
+            })
+        );
+      })
+      .then(function () {
+        return self.clients.claim();
+      })
+  );
+});
+
+function isAppOrChartCdn(url) {
+  return url.origin === self.location.origin || url.hostname === 'cdn.jsdelivr.net';
+}
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var data = event.notification.data || {};
+  var url = typeof data.url === 'string' ? data.url : self.location.origin + self.location.pathname;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        if (c.url && String(c.url).indexOf(self.location.origin) === 0 && 'focus' in c) {
+          return c.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(url);
+      }
     })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', function (event) {
   var req = event.request;
   if (req.method !== 'GET') return;
+
   var url = new URL(req.url);
-  if (url.origin === self.location.origin || url.hostname === 'cdn.jsdelivr.net') {
-    event.respondWith(
-      caches.match(req).then(function (cached) {
-        if (cached) return cached;
-        return fetch(req).then(function (res) {
-          if (res && res.status === 200 && url.origin === self.location.origin) {
-            var copy = res.clone();
-            caches.open(CACHE).then(function (c) {
-              c.put(req, copy);
-            });
-          }
-          return res;
-        });
-      })
-    );
+  if (!isAppOrChartCdn(url)) {
+    event.respondWith(fetch(req));
     return;
   }
-  event.respondWith(fetch(req));
+
+  event.respondWith(
+    fetch(req)
+      .then(function (res) {
+        if (res && res.status === 200) {
+          var copy = res.clone();
+          caches.open(CACHE_NAME).then(function (cache) {
+            cache.put(req, copy);
+          });
+        }
+        return res;
+      })
+      .catch(function () {
+        return caches.match(req);
+      })
+  );
 });
