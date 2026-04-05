@@ -8,7 +8,7 @@
   <title>Weather</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="styles-v2.css?v=5">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
 </head>
@@ -57,12 +57,13 @@
     
 
 
-    <div id="chartViewPanel">
-      <div class="chart-main ui-section" data-ui-section>
-        <div class="chart-toolbar">
+    <div class="chart-stack ui-section" data-ui-section>
+      <div class="chart-toolbar">
+        <div class="chart-toolbar__stack">
           <div class="period" role="group" aria-label="Time range">
             <button type="button" class="period__btn is-active" id="periodDay" data-mode="day">Day</button>
             <button type="button" class="period__btn" id="periodWeek" data-mode="week">Week</button>
+            <button type="button" class="period__btn" id="period14" data-mode="14day">14 Day</button>
             <button type="button" class="period__btn" id="periodRadar" data-mode="radar">Radar</button>
           </div>
           <div class="day-nav" id="dayNav">
@@ -71,8 +72,15 @@
             <button type="button" class="day-nav__btn" id="dayNext" aria-label="Next day">→</button>
           </div>
         </div>
+      </div>
 
-        <div class="chart-row">
+    <div id="chartViewPanel">
+      <div class="chart-main">
+        <div id="fourteenDayPanel" class="fourteen-day-panel" hidden>
+          <div id="fourteenDayList" class="fourteen-day-list" role="list" aria-label="14 day outlook by day"></div>
+        </div>
+
+        <div class="chart-row" id="chartRow">
           <div class="chart-y-rail" id="yRailWrap">
             <div class="chart-y-rail__cap" id="yRailCap"></div>
             <div class="chart-y-rail__ticks" id="yRail"></div>
@@ -87,6 +95,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
 
     <div id="radarViewPanel" class="radar-view" hidden>

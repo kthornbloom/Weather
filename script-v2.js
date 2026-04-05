@@ -194,11 +194,15 @@
   var yRailCap = document.getElementById('yRailCap');
   var periodDay = document.getElementById('periodDay');
   var periodWeek = document.getElementById('periodWeek');
+  var period14 = document.getElementById('period14');
   var periodRadar = document.getElementById('periodRadar');
   var chartViewPanel = document.getElementById('chartViewPanel');
   var radarViewPanel = document.getElementById('radarViewPanel');
   var radarMapEl = document.getElementById('radarMap');
   var dayNav = document.getElementById('dayNav');
+  var chartRow = document.getElementById('chartRow');
+  var fourteenDayPanel = document.getElementById('fourteenDayPanel');
+  var fourteenDayList = document.getElementById('fourteenDayList');
   var dayPrev = document.getElementById('dayPrev');
   var dayNext = document.getElementById('dayNext');
   var dayLabel = document.getElementById('dayLabel');
@@ -322,6 +326,17 @@
     container.appendChild(cell);
   }
 
+  /** Keep sunrise / sunset on one row so the last stat doesn’t stretch full width alone. */
+  function appendRightNowSunPair(container, riseStr, setStr) {
+    var wrap = document.createElement('div');
+    wrap.className = 'right-now__sun-pair';
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Sunrise and sunset');
+    appendRightNowStat(wrap, riseStr, 'Sunrise');
+    appendRightNowStat(wrap, setStr, 'Sunset');
+    container.appendChild(wrap);
+  }
+
   function updateRightNow(data, pollenData) {
     if (!rightNowSummaryEl || !rightNowStatsEl) return;
     var cw = data && data.current_weather;
@@ -373,8 +388,7 @@
     }
     appendRightNowStat(rightNowStatsEl, humidStr, 'Humid.');
     appendRightNowStat(rightNowStatsEl, uvStr, 'UV');
-    appendRightNowStat(rightNowStatsEl, riseStr, 'Sunrise');
-    appendRightNowStat(rightNowStatsEl, setStr, 'Sunset');
+    appendRightNowSunPair(rightNowStatsEl, riseStr, setStr);
   }
 
   function pad2(n) {
@@ -554,10 +568,102 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
+  /** @returns {{ dow: string, md: string } | null} — e.g. { dow: 'SUN', md: 'APR 5' } */
+  function fourteenDayHeadingParts(dayKey) {
+    if (!dayKey) return null;
+    var parts = dayKey.split('-');
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10) - 1;
+    var day = parseInt(parts[2], 10);
+    var dt = new Date(y, m, day);
+    if (isNaN(dt.getTime())) return null;
+    return {
+      dow: WEEK_AXIS_DAYS[dt.getDay()],
+      md: WEEK_AXIS_MONTHS[dt.getMonth()] + ' ' + dt.getDate()
+    };
+  }
+
+  function renderFourteenDayList() {
+    if (!fourteenDayList || !fullHourlyPayload || !fullTimesIso.length) return;
+    fourteenDayList.innerHTML = '';
+    var metricKey = getSelectedKey();
+    var days = uniqueDayKeys.slice(0, 14);
+
+    for (var d = 0; d < days.length; d++) {
+      var dayKey = days[d];
+      var nums = [];
+      for (var i = 0; i < fullTimesIso.length; i++) {
+        if (localDayKey(fullTimesIso[i]) !== dayKey) continue;
+        var raw = fullHourlyPayload[metricKey] && fullHourlyPayload[metricKey][i];
+        var x = Number(raw);
+        if (!isNaN(x)) nums.push(x);
+      }
+
+      var row = document.createElement('div');
+      row.className = 'fourteen-day-row';
+      if (dayKey === localDayKeyToday()) {
+        row.classList.add('fourteen-day-row--today');
+      }
+      row.setAttribute('role', 'listitem');
+
+      var labelEl = document.createElement('div');
+      labelEl.className = 'fourteen-day-row__date';
+      var heading = fourteenDayHeadingParts(dayKey);
+      if (heading) {
+        var dowSpan = document.createElement('span');
+        dowSpan.className = 'fourteen-day-row__dow';
+        dowSpan.textContent = heading.dow;
+        labelEl.appendChild(dowSpan);
+        labelEl.appendChild(document.createTextNode(' '));
+        var mdSpan = document.createElement('span');
+        mdSpan.className = 'fourteen-day-row__md';
+        mdSpan.textContent = heading.md;
+        labelEl.appendChild(mdSpan);
+      } else {
+        labelEl.textContent = '—';
+      }
+
+      var valsEl = document.createElement('div');
+      valsEl.className = 'fourteen-day-row__hilo';
+
+      if (nums.length) {
+        var hi = Math.max.apply(null, nums);
+        var lo = Math.min.apply(null, nums);
+        var hiStr = formatTooltipValue(hi, metricKey);
+        var loStr = formatTooltipValue(lo, metricKey);
+        var meta = optByKey(metricKey);
+        var u = meta.unit || '';
+        if (hiStr != null && loStr != null) {
+          valsEl.appendChild(buildMetricHiSpan(hiStr, u));
+          valsEl.appendChild(document.createTextNode(' '));
+          valsEl.appendChild(buildMetricLoSpan(loStr, u));
+        } else {
+          valsEl.textContent = '—';
+        }
+      } else {
+        valsEl.textContent = '—';
+      }
+
+      row.appendChild(labelEl);
+      row.appendChild(valsEl);
+      fourteenDayList.appendChild(row);
+    }
+  }
+
   function computeScrollInnerWidth(pointCount) {
     var w = chartScroll.clientWidth || document.documentElement.clientWidth || 360;
-    var zoom = viewMode === 'day' ? 1.58 : 1.22;
-    var perPoint = viewMode === 'day' ? 32 : 11;
+    var zoom;
+    var perPoint;
+    if (viewMode === 'day') {
+      zoom = 1.58;
+      perPoint = 32;
+    } else if (viewMode === 'week') {
+      zoom = 0.88;
+      perPoint = 5;
+    } else {
+      zoom = 1.22;
+      perPoint = 11;
+    }
     return Math.max(Math.floor(w * zoom), Math.max(pointCount, 4) * perPoint);
   }
 
@@ -571,9 +677,15 @@
     return scale.ticks || [];
   }
 
+  /** Open-Meteo variables in °F shown in chart, tooltips, hi/lo, 14-day list. */
+  function isTemperatureSeriesKey(key) {
+    return key === 'temperature_2m' || key === 'apparent_temperature' || key === 'dew_point_2m';
+  }
+
   function syncYRail(chart) {
     if (!yRail || !chart || !chart.scales.y) return;
     var y = chart.scales.y;
+    var metricKey = chart.$metricKey || getSelectedKey();
     var ticks = getYTicks(y);
     yRail.innerHTML = '';
     for (var i = 0; i < ticks.length; i++) {
@@ -584,7 +696,11 @@
       var div = document.createElement('div');
       div.className = 'chart-y-tick';
       div.style.top = py + 'px';
-      div.textContent = t.label != null ? String(t.label) : String(val);
+      if (isTemperatureSeriesKey(metricKey)) {
+        div.textContent = String(Math.round(Number(val)));
+      } else {
+        div.textContent = t.label != null ? String(t.label) : String(val);
+      }
       yRail.appendChild(div);
     }
   }
@@ -904,12 +1020,33 @@
         }
       }
     });
+    chartInstance.$metricKey = seriesKey;
     startLineRevealAnimation();
   }
 
   function refreshChart() {
     if (viewMode === 'radar') return;
     if (!fullHourlyPayload || !fullTimesIso.length) return;
+
+    if (viewMode === '14day') {
+      statusEl.textContent = '';
+      viewTimesIso = [];
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+      yRail.innerHTML = '';
+      if (yRailCap) yRailCap.textContent = '';
+      if (chartRow) chartRow.hidden = true;
+      if (fourteenDayPanel) fourteenDayPanel.hidden = false;
+      renderFourteenDayList();
+      updateMetricDayHiLo();
+      return;
+    }
+
+    if (fourteenDayPanel) fourteenDayPanel.hidden = true;
+    if (chartRow) chartRow.hidden = false;
+
     var slice = sliceDataForView();
     viewTimesIso = slice.times;
     if (!viewTimesIso.length) {
@@ -941,6 +1078,7 @@
   function updatePeriodButtons() {
     periodDay.classList.toggle('is-active', viewMode === 'day');
     periodWeek.classList.toggle('is-active', viewMode === 'week');
+    if (period14) period14.classList.toggle('is-active', viewMode === '14day');
     periodRadar.classList.toggle('is-active', viewMode === 'radar');
   }
 
@@ -1061,7 +1199,7 @@
       lon +
       '&hourly=' +
       encodeURIComponent(forecastHourlyParamString) +
-      '&daily=sunrise,sunset&timezone=auto&forecast_days=7&current_weather=true' +
+      '&daily=sunrise,sunset&timezone=auto&forecast_days=14&current_weather=true' +
       '&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch';
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error('Forecast ' + r.status);
@@ -1428,8 +1566,39 @@
     }, ALERT_POLL_MS);
   }
 
+  function buildMetricHiSpan(hiStr, unitSuffix) {
+    var wrap = document.createElement('span');
+    wrap.className = 'metric-blurb__hi';
+    var caret = document.createElement('span');
+    caret.className = 'metric-blurb__hi-caret';
+    caret.textContent = '▲';
+    var val = document.createElement('span');
+    val.className = 'metric-blurb__hi-val';
+    val.textContent = ' ' + hiStr + unitSuffix;
+    wrap.appendChild(caret);
+    wrap.appendChild(val);
+    return wrap;
+  }
+
+  function buildMetricLoSpan(loStr, unitSuffix) {
+    var wrap = document.createElement('span');
+    wrap.className = 'metric-blurb__lo';
+    var caret = document.createElement('span');
+    caret.className = 'metric-blurb__lo-caret';
+    caret.textContent = '▼';
+    var val = document.createElement('span');
+    val.className = 'metric-blurb__lo-val';
+    val.textContent = ' ' + loStr + unitSuffix;
+    wrap.appendChild(caret);
+    wrap.appendChild(val);
+    return wrap;
+  }
+
   function formatTooltipValue(v, seriesKey) {
     if (v == null || Number.isNaN(v)) return null;
+    if (isTemperatureSeriesKey(seriesKey)) {
+      return String(Math.round(v));
+    }
     var abs = Math.abs(v);
     if (
       seriesKey === 'precipitation' ||
@@ -1486,16 +1655,9 @@
     var u = meta.unit || '';
     metricDayHiLoEl.hidden = false;
     metricDayHiLoEl.textContent = '';
-    metricDayHiLoEl.appendChild(document.createTextNode(': '));
-    var spanHi = document.createElement('span');
-    spanHi.className = 'metric-blurb__hi';
-    spanHi.textContent = '▲ ' + hiStr + u;
-    metricDayHiLoEl.appendChild(spanHi);
+    metricDayHiLoEl.appendChild(buildMetricHiSpan(hiStr, u));
     metricDayHiLoEl.appendChild(document.createTextNode(' '));
-    var spanLo = document.createElement('span');
-    spanLo.className = 'metric-blurb__lo';
-    spanLo.textContent = '▼ ' + loStr + u;
-    metricDayHiLoEl.appendChild(spanLo);
+    metricDayHiLoEl.appendChild(buildMetricLoSpan(loStr, u));
   }
 
   function setPlaceLabel(lat, lon, usedDefault) {
@@ -1570,6 +1732,11 @@
     periodWeek.addEventListener('click', function () {
       setViewMode('week');
     });
+    if (period14) {
+      period14.addEventListener('click', function () {
+        setViewMode('14day');
+      });
+    }
     periodRadar.addEventListener('click', function () {
       setViewMode('radar');
     });
@@ -1652,6 +1819,7 @@
       if (radarLeafletMap) radarLeafletMap.invalidateSize();
       return;
     }
+    if (viewMode === '14day') return;
     if (!fullHourlyPayload) return;
     applyScrollInnerWidth(viewTimesIso.length || fullTimesIso.length);
     if (chartInstance) {
