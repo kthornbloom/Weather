@@ -1,79 +1,94 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Weather App - Fort Wayne, IN</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Minimal hourly weather from Open-Meteo">
+  <title>Weather</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <div class="header-content">
-                <h1 class="title">Fort Wayne Weather</h1>
-                <p class="location">Fort Wayne, Indiana</p>
-            </div>
-        </header>
+  <div id="alertBar" class="alert-bar" role="region" aria-label="Active weather alerts" hidden></div>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="top">
+    <div class="top__meta">
+      <h1 class="title">Weather</h1>
+      <p class="place" id="placeLabel">Locating…</p>
+      <p class="right-now" id="rightNow" aria-live="polite"></p>
+    </div>
+    <div class="metric-picker" id="metricPicker">
+      <button type="button" class="metric-picker__toggle" id="metricToggle" aria-expanded="false" aria-haspopup="listbox" aria-controls="metricList">
+        <span class="metric-picker__current" id="metricCurrent">Metric</span>
+        <span class="metric-picker__caret" aria-hidden="true"></span>
+      </button>
+      <div class="metric-picker__panel" id="metricPanel" hidden>
+        <ul class="metric-picker__list" id="metricList" role="radiogroup" aria-labelledby="metricToggle"></ul>
+      </div>
+    </div>
+  </header>
 
-        <section class="controls">
-            <div class="time-range">
-                <label>
-                    <input type="radio" name="days" value="7" checked> 7 Days
-                </label>
-                <label>
-                    <input type="radio" name="days" value="14"> 14 Days
-                </label>
-            </div>
-
-            <div class="filters">
-                <label class="filter-label">
-                    <input type="checkbox" class="data-filter" value="temperature" checked>
-                    Temperature
-                </label>
-                <label class="filter-label">
-                    <input type="checkbox" class="data-filter" value="humidity" checked>
-                    Humidity
-                </label>
-                <label class="filter-label">
-                    <input type="checkbox" class="data-filter" value="precipitation" checked>
-                    Precipitation
-                </label>
-                <label class="filter-label">
-                    <input type="checkbox" class="data-filter" value="windSpeed" checked>
-                    Wind Speed
-                </label>
-                <label class="filter-label">
-                    <input type="checkbox" class="data-filter" value="cloudCover" checked>
-                    Cloud Cover
-                </label>
-            </div>
-        </section>
-
-        <section class="chart-container">
-            <canvas id="weatherChart"></canvas>
-        </section>
-
-        <section class="stats">
-            <div class="stat-card">
-                <p class="stat-label">Avg Temperature</p>
-                <p class="stat-value" id="avgTemp">--</p>
-            </div>
-            <div class="stat-card">
-                <p class="stat-label">Avg Humidity</p>
-                <p class="stat-value" id="avgHumidity">--</p>
-            </div>
-            <div class="stat-card">
-                <p class="stat-label">Total Precipitation</p>
-                <p class="stat-value" id="totalPrecipitation">--</p>
-            </div>
-            <div class="stat-card">
-                <p class="stat-label">Avg Wind Speed</p>
-                <p class="stat-value" id="avgWindSpeed">--</p>
-            </div>
-        </section>
+  <main class="chart-wrap">
+    <div class="chart-toolbar">
+      <div class="period" role="group" aria-label="Time range">
+        <button type="button" class="period__btn is-active" id="periodDay" data-mode="day">Day</button>
+        <button type="button" class="period__btn" id="periodWeek" data-mode="week">Week</button>
+        <button type="button" class="period__btn" id="periodRadar" data-mode="radar">Radar</button>
+      </div>
+      <div class="day-nav" id="dayNav">
+        <button type="button" class="day-nav__btn" id="dayPrev" aria-label="Previous day">←</button>
+        <span class="day-nav__label" id="dayLabel">—</span>
+        <button type="button" class="day-nav__btn" id="dayNext" aria-label="Next day">→</button>
+      </div>
     </div>
 
-    <script src="script.js"></script>
+    <div id="chartViewPanel">
+      <section class="metric-blurb" id="metricBlurb" aria-live="polite">
+        <h2 class="metric-blurb__title" id="metricBlurbTitle">Metric</h2>
+        <p class="metric-blurb__desc" id="metricBlurbDesc"></p>
+      </section>
+
+      <div class="chart-row">
+        <div class="chart-y-rail" id="yRailWrap">
+          <div class="chart-y-rail__cap" id="yRailCap"></div>
+          <div class="chart-y-rail__ticks" id="yRail"></div>
+        </div>
+        <div class="chart-scroll" id="chartScroll">
+          <div class="chart-scroll-inner" id="chartScrollInner">
+            <div class="chart-canvas-spacer" aria-hidden="true"></div>
+            <div class="chart-canvas-wrap">
+              <canvas id="weatherChart" aria-label="Hourly weather chart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="radarViewPanel" class="radar-view" hidden>
+      <section class="metric-blurb radar-blurb" aria-live="polite">
+        <h2 class="metric-blurb__title">Radar</h2>
+        <p class="metric-blurb__desc">
+          Composite reflectivity on a map (past ~2 hours, 10-minute frames). Pan and zoom; the dot marks your location.
+        </p>
+      </section>
+      <div class="radar-frame">
+        <div id="radarMap" class="radar-map" role="application" aria-label="Interactive weather radar map"></div>
+      </div>
+      <p class="radar-attrib">
+        Basemap © <a href="https://www.openstreetmap.org/copyright" rel="noopener noreferrer">OpenStreetMap</a>
+        contributors. Radar: <a href="https://www.rainviewer.com/" rel="noopener noreferrer">Rain Viewer</a>.
+      </p>
+    </div>
+  </main>
+
+  <p class="status" id="status" role="status"></p>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <script src="script.js" defer></script>
 </body>
 </html>
